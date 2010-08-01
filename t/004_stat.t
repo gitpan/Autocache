@@ -1,11 +1,11 @@
-#!/usr/bin/perl 
+#!/usr/bin/perl
 
 use strict;
 use warnings;
 
 use Test::More tests => 5;
-use Log::Log4perl;
-Log::Log4perl::init( 't/log.conf' );
+###l4p use Log::Log4perl;
+###l4p Log::Log4perl::init( 't/log.conf' );
 use Autocache qw( autocache );
 
 Autocache->initialise( filename => 't/004_stat.t.conf' );
@@ -30,7 +30,7 @@ exit;
 
 sub fib
 {
-    my ($n) = @_;    
+    my ($n) = @_;
     return 1 if( $n == 1 || $n == 2 );
     return ( fib( $n - 1 ) + fib( $n - 2 ) );
 }

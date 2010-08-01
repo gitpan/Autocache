@@ -1,19 +1,12 @@
 
 - test memcached
 
-- test refresh
-
-- add cost-based caching strategy
-
 - add shared memory store
 
-- cleanup logging
+- cleanup logging, remove dependence on log4perl and perhaps allow logger
+  injection
 
 - remove all die/confess statements except where they are in the init phase
-
-- remove debugging to STDERR
-
-- add better way of getting cache stats
 
 - add way of getting cache sizes out
 
@@ -21,5 +14,23 @@
 
 - honour function stratgey parameter in code
 
-- refactor strategy API to completely seperate record creation from
-  retreival/setting
+- possibly make 'autocache' exported by default?
+
+- add option to conflate both scalar and list context results if the
+  function returns equivalent data in either case
+
+- add more POD for all packages
+
+- add manual POD
+
+- add cookbook for common use-cases
+
+- enhance MemoryLRU to not store objects larger than some maximum size
+
+- enhance MemoryLRU, or add another class that allows us to store a maximum
+  number of objects rather than size
+
+- add MemoryFIFO store
+
+- look for other neat Cache::* classes that we might be able to simply add
+

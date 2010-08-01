@@ -3,22 +3,20 @@ package Autocache;
 use strict;
 use warnings;
 
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 $VERSION = eval $VERSION;
 
-use Carp;
-use Data::Dumper;
-###l4p use Log::Log4perl qw( get_logger );
-
 use Autocache::Config;
-use Autocache::Store::Memory;
-use Autocache::Strategy::Simple;
+use Autocache::Request;
+use Autocache::Strategy::Store::Memory;
 use Autocache::WorkQueue;
+use Carp;
+
+###l4p use Log::Log4perl qw( get_logger );
 
 require Exporter;
 
 our @ISA = qw( Exporter );
-our @EXPORT = ();
 our @EXPORT_OK = qw( autocache );
 
 my $SINGLETON;
@@ -53,7 +51,6 @@ sub new
     my $self =
         {
             config => $config,
-            store => {},
             strategy => {},
             default_strategy => undef,
             work_queue => undef,
@@ -65,25 +62,6 @@ sub new
 sub configure
 {
     my ($self) = @_;
-    
-    foreach my $node ( $self->{config}->get_node( 'store' )->children )
-    {
-        my $name = $node->name;
-        my $package = $node->value;
-        _use_package( $package );
-
-        my $store;
-
-        eval
-        {
-            $store = $package->new( $node );
-        };
-        if( $@ )
-        {
-            confess "cannot create store $name using package $package - $@";
-        }
-        $self->{store}{$node->name} = $store;
-    }
 
     foreach my $node ( $self->{config}->get_node( 'strategy' )->children )
     {
@@ -106,12 +84,6 @@ sub configure
 
     $self->configure_functions( $self->{config}->get_node( 'fn' ) );
 
-#    if( $self->{config}->get_node( 'default_store' ) )
-#    {
-#        $self->{default_store} = $self->get_store(
-#            $self->{config}->get_node( 'default_store' )->value );
-#    }
-
     if( $self->{config}->node_exists( 'default_strategy' ) )
     {
         $self->{default_strategy} = $self->get_strategy(
@@ -123,12 +95,12 @@ sub configure
     {
         $self->{enable_stats} = $stats->get_node( 'enable' )->value;
     }
-    
+
     if( exists $ENV{AUTOCACHE_STATS} )
     {
         $self->{enable_stats} = $ENV{AUTOCACHE_STATS};
     }
-    
+
     if( $stats->node_exists( 'dump_on_exit' ) )
     {
         $self->{dump_stats} = $stats->get_node( 'dump_on_exit' )->value;
@@ -138,7 +110,7 @@ sub configure
 sub configure_functions
 {
     my ($self,$node,$namespace) = @_;
-    
+
     $namespace ||= '';
 
     if( $node->value )
@@ -180,13 +152,13 @@ sub _cache_function
 ###l4p     get_logger()->debug( "cache : $r / $g"  );
 
     no strict 'refs';
-    
+
     # get generator routine ref
     my $gsub = *{$r}{CODE};
 
     # see if we have a normaliser
     my $gsub_norm = *{$n}{CODE};
-    
+
     unless( defined $gsub_norm )
     {
 ###l4p         get_logger()->debug( "no normaliser, using default" );
@@ -226,7 +198,7 @@ sub get_strategy_for_fn
 {
     my ($self,$name) = @_;
 ###l4p     get_logger()->debug( "get_strategy_for_fn '$name'" );
-    
+
     return $self->get_default_strategy()
         unless exists $self->{fn}{$name}{strategy};
 
@@ -242,36 +214,15 @@ sub get_strategy
     return $self->{strategy}{$name};
 }
 
-sub get_store
-{
-    my ($self,$name) = @_;
-###l4p     get_logger()->debug( "get_store '$name'" );
-    confess "cannot find store $name"
-        unless $self->{store}{$name};
-    return $self->{store}{$name};
-}
-
 sub get_default_strategy
 {
     my ($self) = @_;
 ###l4p     get_logger()->debug( "get_default_strategy" );
     unless( $self->{default_strategy} )
     {
-        $self->{default_strategy} = Autocache::Strategy::Simple->new(
-            store => $self->get_default_store() );
+        $self->{default_strategy} = Autocache::Strategy::Store::Memory->new;
     }
     return $self->{default_strategy};
-}
-
-sub get_default_store
-{
-    my ($self) = @_;
-###l4p     get_logger()->debug( "get_default_store" );
-    unless( $self->{default_store} )
-    {
-        $self->{default_store} = Autocache::Store::Memory->new;
-    }
-    return $self->{default_store};
 }
 
 sub get_default_normaliser
@@ -290,20 +241,26 @@ sub _generate_cached_fn
     {
 ###l4p         get_logger()->debug( "CACHE $name" );
         return unless defined wantarray;
-        my $return_type = wantarray ? 'L' : 'S';
+        my $context = wantarray ? 'L' : 'S';
 
-###l4p         get_logger()->debug( "return type: $return_type" );
+###l4p         get_logger()->debug( "calling context: $context" );
+
+        my $request = Autocache::Request->new(
+            name => $name,
+            normaliser => $normaliser,
+            generator => $coderef,
+            args => \@_,
+            context => $context,
+        );
 
         my $strategy = $self->get_strategy_for_fn( $name );
 
-        my $rec = $strategy->get_cache_record(
-            $name, $normaliser, $coderef, \@_, $return_type );
+        my $rec = $strategy->get( $request );
 
         unless( $rec )
         {
-            $rec = $strategy->create_cache_record(
-                $name, $normaliser, $coderef, \@_, $return_type );
-            $strategy->set_cache_record( $rec );
+            $rec = $strategy->create( $request );
+            $strategy->set( $request, $rec );
         }
 
         my $value = $rec->value;
@@ -321,71 +278,12 @@ sub _default_normaliser
 sub _use_package
 {
     my ($name) = @_;
-###l4p     get_logger()->debug( "use $name" );    
+###l4p     get_logger()->debug( "use $name" );
     eval "use $name";
     if( $@ )
     {
         confess $@;
     }
-}
-
-sub _dump_stats
-{
-    my ($self) = @_;
-    print STDERR "AUTOCACHE STATS\n";
-    foreach my $name ( keys %{$self->{strategy}} )
-    {
-        print STDERR "STRATEGY: $name\n";
-
-        my $strategy = $self->{strategy}{$name};
-
-#        print STDERR "STRAT: ", Dumper( $strategy ), "\n";
-
-        next unless $strategy;
-    
-        my $stats = $strategy->get_statistics();
-
-        if( $stats->{total} > 0 )
-        {
-            printf STDERR "hit  : %8d / %3.2f%%\n",
-                $stats->{hit},
-                ( $stats->{hit} / $stats->{total} ) * 100;
-            printf STDERR "miss : %8d / %3.2f%%\n",
-                $stats->{miss},
-                ( $stats->{miss} / $stats->{total} ) * 100;
-            printf STDERR "total: %d\n", $stats->{total};
-        }
-        else
-        {
-            print STDERR "no statistics available\n";
-        }
-        print STDERR "\n";
-    }
-
-    foreach my $strategy ( values %{$self->{strategy}} )
-    {
-#        print STDERR "STRAT: ", Dumper( $strategy ), "\n";
-
-        next unless $strategy;
-    
-        my $stats = $strategy->get_statistics();
-
-        if( $stats->{total} > 0 )
-        {
-#            printf STDERR "hit  : %-8d / %-3.2f\n",
-#                ( $stats->{hit} / $stats->{total} ) * 100;
-#            printf STDERR "miss : %-8d / %-3.2f\n",
-#                ( $stats->{miss} / $stats->{total} ) * 100;
-#            printf STDERR "total: %d\n", $stats->{total};
-        }
-        else
-        {
-#            print STDERR "no statistics available\n";
-        }
-#        print STDERR "\n";
-    }
-
-    print STDERR "AUTOCACHE STATS DONE\n";
 }
 
 1;
@@ -455,7 +353,7 @@ A pure function being one;
 
 =item
 
-whose value depends soley on the parameters passed to the function and no other global information, state or input from IO or external devices. 
+whose value depends soley on the parameters passed to the function and no other global information, state or input from IO or external devices.
 
 =item
 
@@ -543,7 +441,7 @@ parameters named 'a', 'b', 'c' and 'd' then the following calls are
 equivalent but autocache can't tell that.
 
     fn( 'a', 3, 'd', 4 );
-    
+
     fn( 'd', 4, 'a', 3 )
 
 To overcome this you can provide a normalisation function that takes the
