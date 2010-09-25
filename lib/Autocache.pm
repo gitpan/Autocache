@@ -3,28 +3,27 @@ package Autocache;
 use strict;
 use warnings;
 
-our $VERSION = '0.003_002';
+our $VERSION = '0.003_003';
 $VERSION = eval $VERSION;
 
 use Autocache::Config;
 use Autocache::Request;
 use Autocache::Strategy::Store::Memory;
 use Autocache::WorkQueue;
+use Autocache::Logger qw(get_logger);
 use Carp;
-
-###l4p use Log::Log4perl qw( get_logger );
 
 require Exporter;
 
 our @ISA = qw( Exporter );
-our @EXPORT_OK = qw( autocache );
+our @EXPORT = qw( autocache );
 
 my $SINGLETON;
 
 sub autocache
 {
     my ($name,$args) = @_;
-###l4p     get_logger()->debug( "autocache $name" );
+    get_logger()->debug( "autocache $name" );
     my $package = caller;
     __PACKAGE__->singleton->_cache_function( $package, $name, $args );
 }
@@ -42,6 +41,9 @@ sub initialise
     my $class = shift;
     $SINGLETON = $class->new( @_ );
     $SINGLETON->configure;
+    my %args = @_;
+    Autocache::Logger->initialise(logger => $args{logger})
+        if $args{logger};
 }
 
 sub new
@@ -89,22 +91,6 @@ sub configure
         $self->{default_strategy} = $self->get_strategy(
             $self->{config}->get_node( 'default_strategy' )->value );
     }
-
-    my $stats = $self->{config}->get_node( 'stats' );
-    if( $stats->node_exists( 'enable' ) )
-    {
-        $self->{enable_stats} = $stats->get_node( 'enable' )->value;
-    }
-
-    if( exists $ENV{AUTOCACHE_STATS} )
-    {
-        $self->{enable_stats} = $ENV{AUTOCACHE_STATS};
-    }
-
-    if( $stats->node_exists( 'dump_on_exit' ) )
-    {
-        $self->{dump_stats} = $stats->get_node( 'dump_on_exit' )->value;
-    }
 }
 
 sub configure_functions
@@ -115,7 +101,7 @@ sub configure_functions
 
     if( $node->value )
     {
-###l4p         get_logger()->debug( "fn: $namespace -> " . $node->value );
+        get_logger()->debug( "fn: $namespace -> " . $node->value );
 
         $self->{fn}{$namespace}{strategy} = $node->value;
     }
@@ -129,7 +115,7 @@ sub configure_functions
 sub cache_function
 {
     my ($self,$name,$args) = @_;
-###l4p     get_logger()->debug( "cache_function '$name'" );
+    get_logger()->debug( "cache_function '$name'" );
     my $package = caller;
     $self->_cache_function( $package, $name, $args );
 }
@@ -138,7 +124,7 @@ sub _cache_function
 {
     my ($self,$package,$name,$args) = @_;
 
-###l4p     get_logger()->debug( "_cache_function '$name'" );
+    get_logger()->debug( "_cache_function '$name'" );
 
     # r : cache routine name
     my $r = '::' . $package . '::' . $name;
@@ -149,7 +135,7 @@ sub _cache_function
     # g : generator routine name
     my $g = __PACKAGE__ . '::G' . $r;
 
-###l4p     get_logger()->debug( "cache : $r / $g"  );
+    get_logger()->debug( "cache : $r / $g"  );
 
     no strict 'refs';
 
@@ -161,7 +147,7 @@ sub _cache_function
 
     unless( defined $gsub_norm )
     {
-###l4p         get_logger()->debug( "no normaliser, using default" );
+        get_logger()->debug( "no normaliser, using default" );
         $gsub_norm = $self->get_default_normaliser();
     }
 
@@ -179,14 +165,14 @@ sub _cache_function
 sub run_work_queue
 {
     my($self) = @_;
-###l4p     get_logger()->debug( "run_work_queue" );
+    get_logger()->debug( "run_work_queue" );
     $self->get_work_queue()->execute();
 }
 
 sub get_work_queue
 {
     my ($self) = @_;
-###l4p     get_logger()->debug( "get_work_queue" );
+    get_logger()->debug( "get_work_queue" );
     unless( $self->{work_queue} )
     {
         $self->{work_queue} = Autocache::WorkQueue->new();
@@ -197,7 +183,7 @@ sub get_work_queue
 sub get_strategy_for_fn
 {
     my ($self,$name) = @_;
-###l4p     get_logger()->debug( "get_strategy_for_fn '$name'" );
+    get_logger()->debug( "get_strategy_for_fn '$name'" );
 
     return $self->get_default_strategy()
         unless exists $self->{fn}{$name}{strategy};
@@ -208,7 +194,7 @@ sub get_strategy_for_fn
 sub get_strategy
 {
     my ($self,$name) = @_;
-###l4p     get_logger()->debug( "get_strategy '$name'" );
+    get_logger()->debug( "get_strategy '$name'" );
     confess "cannot find strategy $name"
         unless $self->{strategy}{$name};
     return $self->{strategy}{$name};
@@ -217,7 +203,7 @@ sub get_strategy
 sub get_default_strategy
 {
     my ($self) = @_;
-###l4p     get_logger()->debug( "get_default_strategy" );
+    get_logger()->debug( "get_default_strategy" );
     unless( $self->{default_strategy} )
     {
         $self->{default_strategy} = Autocache::Strategy::Store::Memory->new;
@@ -228,22 +214,22 @@ sub get_default_strategy
 sub get_default_normaliser
 {
     my ($self) = @_;
-###l4p     get_logger()->debug( "get_default_normaliser" );
+    get_logger()->debug( "get_default_normaliser" );
     return \&_default_normaliser;
 }
 
 sub _generate_cached_fn
 {
     my ($self,$name,$normaliser,$coderef) = @_;
-###l4p     get_logger()->debug( "_generate_cached_fn $name" );
+    get_logger()->debug( "_generate_cached_fn $name" );
 
     return sub
     {
-###l4p         get_logger()->debug( "CACHE $name" );
+        get_logger()->debug( "CACHE $name" );
         return unless defined wantarray;
         my $context = wantarray ? 'L' : 'S';
 
-###l4p         get_logger()->debug( "calling context: $context" );
+        get_logger()->debug( "calling context: $context" );
 
         my $request = Autocache::Request->new(
             name => $name,
@@ -271,14 +257,14 @@ sub _generate_cached_fn
 
 sub _default_normaliser
 {
-###l4p     get_logger()->debug( "_default_normaliser" );
+    get_logger()->debug( "_default_normaliser" );
     return join ':', @_;
 }
 
 sub _use_package
 {
     my ($name) = @_;
-###l4p     get_logger()->debug( "use $name" );
+    get_logger()->debug( "use $name" );
     eval "use $name";
     if( $@ )
     {
@@ -325,14 +311,11 @@ In addition to this though Autocache allows you to specify in great detail
 how and where function results get cached.
 
 The module uses IoC/dependency injection from a configuration file to setup
-a number of Stores and Strategies. These are the basic building blocks used
-to determine how things get cached.
+a number Strategies. These are the basic building blocks used to determine
+how things get cached.
 
 Strategies determine how a cached value should be validated, refreshed, and
 even whether or not the value should be stored at all.
-
-Stores provide the actual storage for values and also specify how values get
-evicted from stores, if at all.
 
 The goal here is to make it stupidly simple to start to cache certain
 functions, and change where and how those values get cached if you find
@@ -494,20 +477,18 @@ the same value is returned in either scalr or list context.
 
 =head1 ARCHITECTURE
 
-Autocache splits up the process of caching into generating the values and
-storing the values.
+Autocache initially split up the process of caching into generating the values and
+storing the values.  This has since been unified under the banner of 'strategies'.
+There is a 'Store' namespace in 'Strategy', intended to represent strategies
+that involve storage.
 
-Values are generated using Strategies, which may be chained. Some examples
-of Strategies are Simple, Refresh and CostBased.
+Strategies may be chained.  Some examples of Strategies are CostBased, Refresh,
+Store::Memory and Store::Memcached.
 
-Values are stored using Stores. Some examples of Stores are UnboundedMemory,
-BoundedMemoryLRU and Memcached.
-
-The API for both Strategies and Stores is not yet completely fixed but you
-should be able to quite easily take one of those that already exists and
-modify it to suit your needs. The configuration syntax allows you to use any
-custom classes you like as long as they can accept the way we perform IoC
-(sub-optimal right now).
+The API for Strategies is not yet completely fixed but you should be able to quite
+easily take one of those that already exists and modify it to suit your needs. The
+configuration syntax allows you to use any custom classes you like as long as they
+can accept the way we perform IoC (sub-optimal right now).
 
 =head1 TODO
 

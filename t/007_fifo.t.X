@@ -7,7 +7,7 @@ use Test::More tests => 10;
 
 use Autocache::Request;
 use Autocache::Record;
-use Autocache::Strategy::Eviction::LRU;
+use Autocache::Strategy::Eviction::FIFO;
 use Autocache::Strategy::Store::Memory;
 
 use Devel::Size qw( total_size );
@@ -32,7 +32,7 @@ my $record_size = total_size( $records{a} );
 
 my $max_size = $record_size * 3;
 
-my $store = Autocache::Strategy::Eviction::LRU->new(
+my $store = Autocache::Strategy::Eviction::FIFO->new(
     max_size => $max_size,
     base_strategy => Autocache::Strategy::Store::Memory->new, );
 
@@ -58,6 +58,10 @@ $store->set( $requests{$key}, $records{$key} );
 isnt( $store->get( $requests{a} ), undef, 'record not evicted' );
 isnt( $store->get( $requests{b} ), undef, 'record not evicted' );
 isnt( $store->get( $requests{c} ), undef, 'record not evicted' );
+
+$key = 'a';
+
+$store->get( $requests{$key} );
 
 $key = 'd';
 

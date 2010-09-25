@@ -3,7 +3,7 @@ my $filename = shift;
 
 my $mb = Module::Build->current();
 
-if( $mb->feature( 'memory_lru' ) )
+if( $mb->feature( 'eviction_fifo' ) )
 {
     qx/link $filename.X $filename/;
 }
